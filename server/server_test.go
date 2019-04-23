@@ -3261,7 +3261,7 @@ allow {
 		WithAddresses([]string{"https://127.0.0.1:8182"}).
 		WithStore(store).
 		WithManager(m).
-		WithCertificate(&cert).
+		WithCertificate("testdata/server-cert.pem", "testdata/server-key.pem", false).
 		WithCertPool(pool).
 		WithAuthentication(AuthenticationTLS).
 		WithAuthorization(AuthorizationBasic).

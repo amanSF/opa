@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/tls"
 	"crypto/x509"
 	"fmt"
 	"io"
@@ -70,9 +69,14 @@ type Params struct {
 	// Authorization is the type of authorization scheme to use.
 	Authorization server.AuthorizationScheme
 
-	// Certificate is the certificate to use in server-mode. If the certificate
-	// is nil, the server will NOT use TLS.
-	Certificate *tls.Certificate
+	// CertificateLoc is the certificate file path to use in server-mode.
+	CertificateLoc string
+
+	// KeyLoc is the key file path to use in server-mode.
+	KeyLoc string
+
+	// CertRefreshEnabled flag controls whether cert refresh is enabled
+	CertRefreshEnabled bool
 
 	// CertPool holds the CA certs trusted by the OPA server.
 	CertPool *x509.CertPool
@@ -258,7 +262,7 @@ func (rt *Runtime) StartServer(ctx context.Context) {
 		WithPprofEnabled(rt.Params.PprofEnabled).
 		WithAddresses(*rt.Params.Addrs).
 		WithInsecureAddress(rt.Params.InsecureAddr).
-		WithCertificate(rt.Params.Certificate).
+		WithCertificate(rt.Params.CertificateLoc, rt.Params.KeyLoc, rt.Params.CertRefreshEnabled).
 		WithCertPool(rt.Params.CertPool).
 		WithAuthentication(rt.Params.Authentication).
 		WithAuthorization(rt.Params.Authorization).
@@ -303,9 +307,9 @@ func (rt *Runtime) StartServer(ctx context.Context) {
 			defer cancel()
 			err = s.Shutdown(ctx)
 			if err != nil {
-				logrus.WithField("err", err).Error("Failed to shutdown server gracefully.")
+				logrus.WithField("err", err).Error("Failed to shutdown server gracefully")
 			} else {
-				logrus.Info("Server shutdown.")
+				logrus.Info("Server shutdown")
 			}
 			os.Exit(1)
 		case err := <-errc:

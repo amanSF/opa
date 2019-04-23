@@ -28,7 +28,7 @@ const (
 
 func init() {
 
-	var serverMode bool
+	var serverMode, tlsHandleRefresh bool
 	var tlsCertFile, tlsPrivateKeyFile, tlsCACertFile string
 	var ignore []string
 
@@ -92,7 +92,7 @@ the data document with the following syntax:
 `,
 		Run: func(cmd *cobra.Command, args []string) {
 
-			cert, err := loadCertificate(tlsCertFile, tlsPrivateKeyFile)
+			err := validateCertificate(tlsCertFile, tlsPrivateKeyFile)
 			if err != nil {
 				fmt.Println("error:", err)
 				os.Exit(1)
@@ -109,7 +109,9 @@ the data document with the following syntax:
 
 			params.Authentication = authenticationSchemes[authentication.String()]
 			params.Authorization = authorizationScheme[authorization.String()]
-			params.Certificate = cert
+			params.CertificateLoc = tlsCertFile
+			params.KeyLoc = tlsPrivateKeyFile
+			params.CertRefreshEnabled = tlsHandleRefresh
 			params.Logging = runtime.LoggingConfig{
 				Level:  logLevel.String(),
 				Format: logFormat.String(),
@@ -150,6 +152,7 @@ the data document with the following syntax:
 	runCommand.Flags().MarkDeprecated("server-diagnostics-buffer-size", "use decision logging instead")
 	runCommand.Flags().StringVarP(&tlsCertFile, "tls-cert-file", "", "", "set path of TLS certificate file")
 	runCommand.Flags().StringVarP(&tlsPrivateKeyFile, "tls-private-key-file", "", "", "set path of TLS private key file")
+	runCommand.Flags().BoolVarP(&tlsHandleRefresh, "tls-cert-refresh", "", false, "handle refresh of TLS certificate")
 	runCommand.Flags().StringVarP(&tlsCACertFile, "tls-ca-cert-file", "", "", "set path of TLS CA cert file")
 	runCommand.Flags().VarP(authentication, "authentication", "", "set authentication scheme")
 	runCommand.Flags().VarP(authorization, "authorization", "", "set authorization scheme")
@@ -180,19 +183,19 @@ func historyPath() string {
 	return path.Join(home, defaultHistoryFile)
 }
 
-func loadCertificate(tlsCertFile, tlsPrivateKeyFile string) (*tls.Certificate, error) {
+func validateCertificate(tlsCertFile, tlsPrivateKeyFile string) error {
 
 	if tlsCertFile != "" && tlsPrivateKeyFile != "" {
-		cert, err := tls.LoadX509KeyPair(tlsCertFile, tlsPrivateKeyFile)
+		_, err := tls.LoadX509KeyPair(tlsCertFile, tlsPrivateKeyFile)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		return &cert, nil
+		return nil
 	} else if tlsCertFile != "" || tlsPrivateKeyFile != "" {
-		return nil, fmt.Errorf("--tls-cert-file and --tls-private-key-file must be specified together")
+		return fmt.Errorf("--tls-cert-file and --tls-private-key-file must be specified together")
 	}
 
-	return nil, nil
+	return nil
 }
 
 func loadCertPool(tlsCACertFile string) (*x509.CertPool, error) {

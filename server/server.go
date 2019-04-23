@@ -90,7 +90,9 @@ type Server struct {
 	insecureAddr      string
 	authentication    AuthenticationScheme
 	authorization     AuthorizationScheme
-	cert              *tls.Certificate
+	certLoc           string
+	keyLoc            string
+	certRefresh       bool
 	certPool          *x509.CertPool
 	mtx               sync.RWMutex
 	partials          map[string]rego.PartialResult
@@ -221,8 +223,10 @@ func (s *Server) WithAuthorization(scheme AuthorizationScheme) *Server {
 }
 
 // WithCertificate sets the server-side certificate that the server will use.
-func (s *Server) WithCertificate(cert *tls.Certificate) *Server {
-	s.cert = cert
+func (s *Server) WithCertificate(cert, key string, refresh bool) *Server {
+	s.certLoc = cert
+	s.keyLoc = key
+	s.certRefresh = refresh
 	return s
 }
 
@@ -302,7 +306,7 @@ func (s *Server) WithRouter(router *mux.Router) *Server {
 func (s *Server) Listeners() ([]Loop, error) {
 	loops := []Loop{}
 	for _, addr := range s.addrs {
-		parsedURL, err := parseURL(addr, s.cert != nil)
+		parsedURL, err := parseURL(addr, s.certLoc != "")
 		if err != nil {
 			return nil, err
 		}
@@ -381,25 +385,67 @@ func (s *Server) getListenerForHTTPServer(u *url.URL) (Loop, httpListener, error
 
 func (s *Server) getListenerForHTTPSServer(u *url.URL) (Loop, httpListener, error) {
 
-	if s.cert == nil {
-		return nil, nil, fmt.Errorf("TLS certificate required but not supplied")
+	var httpsServer *http.Server
+	var err error
+	if s.certRefresh {
+		httpsServer, err = s.getHTTPSServerWithCertRefresh(u)
+
+	} else {
+		httpsServer, err = s.getHTTPSServer(u)
+	}
+	if err != nil || httpsServer == nil {
+		return nil, nil, err
 	}
 
-	httpsServer := http.Server{
-		Addr:    u.Host,
-		Handler: s.Handler,
-		TLSConfig: &tls.Config{
-			Certificates: []tls.Certificate{*s.cert},
-			ClientCAs:    s.certPool,
-		},
-	}
 	if s.authentication == AuthenticationTLS {
 		httpsServer.TLSConfig.ClientAuth = tls.RequireAndVerifyClientCert
 	}
 
 	httpsLoop := func() error { return httpsServer.ListenAndServeTLS("", "") }
 
-	return httpsLoop, newHTTPListener(&httpsServer), nil
+	return httpsLoop, newHTTPListener(httpsServer), nil
+}
+
+func (s *Server) getHTTPSServer(u *url.URL) (*http.Server, error) {
+
+	if s.certLoc == "" || s.keyLoc == "" {
+		return nil, fmt.Errorf("Missing cert or key")
+	}
+
+	cert, err := tls.LoadX509KeyPair(s.certLoc, s.keyLoc)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to load server cert or key, " + err.Error())
+	}
+
+	httpsServer := http.Server{
+		Addr:    u.Host,
+		Handler: s.Handler,
+		TLSConfig: &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			ClientCAs:    s.certPool,
+		},
+	}
+
+	return &httpsServer, nil
+}
+
+func (s *Server) getHTTPSServerWithCertRefresh(u *url.URL) (*http.Server, error) {
+
+	kpr, err := util.NewKeypairReloader(s.certLoc, s.keyLoc, time.Duration(time.Minute))
+	if err != nil {
+		return nil, fmt.Errorf("Failed to load server cert or key, " + err.Error())
+	}
+
+	httpsServer := http.Server{
+		Addr:    u.Host,
+		Handler: s.Handler,
+		TLSConfig: &tls.Config{
+			GetCertificate: kpr.GetKeypairFunc(),
+			ClientCAs:      s.certPool,
+		},
+	}
+
+	return &httpsServer, nil
 }
 
 func (s *Server) getListenerForUNIXSocket(u *url.URL) (Loop, httpListener, error) {
